@@ -2,10 +2,12 @@
 
 ![Components of a deep neural networks](assets/network.png "Components of a deep neural networks")
 
-This repository contains the code for the paper
+This repository contains a few adjustments to the code for the paper
 > B. Glocker, C. Jones, M. Bernhardt, S. Winzeck  
 > [**Algorithmic encoding of protected characteristics in chest X-ray disease detection models**](https://www.thelancet.com/journals/ebiom/article/PIIS2352-3964(23)00032-4/fulltext)  
 > eBioMedicine. Volume 89, 104467, March 2023.
+Those adjustments do not affect how the code works, but improve parameterization and enable trainin on mps
+
 
 ## Dataset
 
