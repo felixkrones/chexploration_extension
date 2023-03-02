@@ -18,7 +18,7 @@ from tqdm import tqdm
 from argparse import ArgumentParser
 
 device_type = "mps"
-random_seed = 42
+random_seed = 21
 img_size = 128
 image_size = (img_size, img_size)
 num_classes = 14
@@ -28,14 +28,19 @@ num_workers = 4
 
 img_data_dir = "/Users/felixkrones/python_projects/data/ChestXpert/"
 
-csv_train_img = f"../datafiles/chexpert/chexpert.sample_{img_size}.train.csv"
-csv_val_img = f"../datafiles/chexpert/chexpert.sample_{img_size}.val.csv"
-csv_test_img = f"../datafiles/chexpert/chexpert.sample_{img_size}.test.csv"
-
-out_name = f"densenet-all_{img_size}"
+csv_train_img = f"../datafiles/chexpert/chexpert.sample_{img_size}_from_train_filtered_True.train.csv"
+csv_val_img = f"../datafiles/chexpert/chexpert.sample_{img_size}_from_train_filtered_True.val.csv"
+csv_test_img = f"../datafiles/chexpert/chexpert.sample_{img_size}_from_train_filtered_True.test.csv"
 
 mode = "train"  # test
-model_path = ""
+model_path = "chexpert/disease/densenet-all_128/version_0/checkpoints/epoch=9-step=5090.ckpt"
+
+if mode == "train":
+    out_name = f"densenet-all_{img_size}"
+elif mode == "test":
+    csv_test_img = f"../datafiles/chexpert/chexpert.sample_{img_size}_from_valid_filtered_False.test.csv"
+    batch_size = 20
+    out_name = f"densenet-all_{img_size}_gt_test"
 
 
 class CheXpertDataset(Dataset):
@@ -393,13 +398,14 @@ def main(hparams):
     cols_names_logits = ["logit_" + str(i) for i in range(0, num_classes)]
     cols_names_targets = ["target_" + str(i) for i in range(0, num_classes)]
 
-    print("VALIDATION")
-    preds_val, targets_val, logits_val = test(model, data.val_dataloader(), device)
-    df = pd.DataFrame(data=preds_val, columns=cols_names_classes)
-    df_logits = pd.DataFrame(data=logits_val, columns=cols_names_logits)
-    df_targets = pd.DataFrame(data=targets_val, columns=cols_names_targets)
-    df = pd.concat([df, df_logits, df_targets], axis=1)
-    df.to_csv(os.path.join(out_dir, "predictions.val.csv"), index=False)
+    if mode == "train":
+        print("VALIDATION")
+        preds_val, targets_val, logits_val = test(model, data.val_dataloader(), device)
+        df = pd.DataFrame(data=preds_val, columns=cols_names_classes)
+        df_logits = pd.DataFrame(data=logits_val, columns=cols_names_logits)
+        df_targets = pd.DataFrame(data=targets_val, columns=cols_names_targets)
+        df = pd.concat([df, df_logits, df_targets], axis=1)
+        df.to_csv(os.path.join(out_dir, "predictions.val.csv"), index=False)
 
     print("TESTING")
     preds_test, targets_test, logits_test = test(model, data.test_dataloader(), device)
@@ -410,14 +416,13 @@ def main(hparams):
     df.to_csv(os.path.join(out_dir, "predictions.test.csv"), index=False)
 
     print("EMBEDDINGS")
-
     model.remove_head()
-
-    embeds_val, targets_val = embeddings(model, data.val_dataloader(), device)
-    df = pd.DataFrame(data=embeds_val)
-    df_targets = pd.DataFrame(data=targets_val, columns=cols_names_targets)
-    df = pd.concat([df, df_targets], axis=1)
-    df.to_csv(os.path.join(out_dir, "embeddings.val.csv"), index=False)
+    if mode == "train":
+        embeds_val, targets_val = embeddings(model, data.val_dataloader(), device)
+        df = pd.DataFrame(data=embeds_val)
+        df_targets = pd.DataFrame(data=targets_val, columns=cols_names_targets)
+        df = pd.concat([df, df_targets], axis=1)
+        df.to_csv(os.path.join(out_dir, "embeddings.val.csv"), index=False)
 
     embeds_test, targets_test = embeddings(model, data.test_dataloader(), device)
     df = pd.DataFrame(data=embeds_test)
