@@ -18,7 +18,7 @@ from tqdm import tqdm
 from argparse import ArgumentParser
 
 device_type = "mps"
-random_seed = 21
+random_seed = 42
 img_size = 128
 image_size = (img_size, img_size)
 num_classes = 14
@@ -32,23 +32,27 @@ csv_train_img = f"../datafiles/chexpert/chexpert.sample_{img_size}_from_train_fi
 csv_val_img = f"../datafiles/chexpert/chexpert.sample_{img_size}_from_train_filtered_True.val.csv"
 csv_test_img = f"../datafiles/chexpert/chexpert.sample_{img_size}_from_train_filtered_True.test.csv"
 
-mode = "train"  # test
-model_path = "chexpert/disease/densenet-all_128/version_0/checkpoints/epoch=9-step=5090.ckpt"
+mode = "test"  # test
 
 if mode == "train":
     out_name = f"densenet-all_{img_size}"
+    run_embeddings = True
 elif mode == "test":
-    csv_test_img = f"../datafiles/chexpert/chexpert.sample_{img_size}_from_valid_filtered_False.test.csv"
-    batch_size = 20
-    out_name = f"densenet-all_{img_size}_gt_test"
+    model_path = "chexpert/disease/densenet-all_128/version_0/checkpoints/epoch=9-step=5090.ckpt"
+    csv_test_img = f"../datafiles/chexpert/chexpert.sample_128.test.G_nz_100_disc_1_sim_0_prev_0_pred_0_cyc_0.csv"
+    batch_size = 25
+    out_name = f"densenet-{csv_test_img.split('sample_')[-1].split('.csv')[0]}"
+    path_col_test = "fake_image_path"  # cropped_image_path, fake_image_path, path_preproc
+    run_embeddings = False
 
 
 class CheXpertDataset(Dataset):
-    def __init__(self, csv_file_img, image_size, augmentation=False, pseudo_rgb=True):
+    def __init__(self, csv_file_img, image_size, augmentation=False, pseudo_rgb=True, path_col="path_preproc"):
         self.data = pd.read_csv(csv_file_img)
         self.image_size = image_size
         self.do_augment = augmentation
         self.pseudo_rgb = pseudo_rgb
+        self.path_col = path_col
 
         self.labels = [
             "No Finding",
@@ -78,7 +82,7 @@ class CheXpertDataset(Dataset):
 
         self.samples = []
         for idx, _ in enumerate(tqdm(range(len(self.data)), desc="Loading Data")):
-            img_path = img_data_dir + self.data.loc[idx, "path_preproc"]
+            img_path = img_data_dir + self.data.loc[idx, self.path_col]
             img_label = np.zeros(len(self.labels), dtype="float32")
             for i in range(0, len(self.labels)):
                 img_label[i] = np.array(
@@ -94,14 +98,21 @@ class CheXpertDataset(Dataset):
     def __getitem__(self, item):
         sample = self.get_sample(item)
 
-        image = torch.from_numpy(sample["image"]).unsqueeze(0)
+        image = torch.from_numpy(sample["image"])#.unsqueeze(0)
         label = torch.from_numpy(sample["label"])
 
         if self.do_augment:
             image = self.augment(image)
 
         if self.pseudo_rgb:
-            image = image.repeat(3, 1, 1)
+            if image.shape[2] == 3:
+                image = image.permute(2, 0, 1)
+            elif image.shape[0] == 3:
+                image = image
+            elif image.shape[0] == 1:
+                image = image.repeat(3, 1, 1)
+            else:
+                raise ValueError(f"Image shape {image.shape} not supported")
 
         return {"image": image, "label": label}
 
@@ -122,6 +133,7 @@ class CheXpertDataModule(pl.LightningDataModule):
         pseudo_rgb,
         batch_size,
         num_workers,
+        path_col_test="path_preproc",
     ):
         super().__init__()
         self.csv_train_img = csv_train_img
@@ -130,6 +142,7 @@ class CheXpertDataModule(pl.LightningDataModule):
         self.image_size = image_size
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.path_col_test = path_col_test
 
         self.train_set = CheXpertDataset(
             self.csv_train_img,
@@ -145,6 +158,7 @@ class CheXpertDataModule(pl.LightningDataModule):
             self.image_size,
             augmentation=False,
             pseudo_rgb=pseudo_rgb,
+            path_col=self.path_col_test
         )
 
         print("#train: ", len(self.train_set))
@@ -339,6 +353,7 @@ def main(hparams):
         pseudo_rgb=True,
         batch_size=batch_size,
         num_workers=num_workers,
+        path_col_test=path_col_test,
     )
 
     # model
@@ -415,20 +430,21 @@ def main(hparams):
     df = pd.concat([df, df_logits, df_targets], axis=1)
     df.to_csv(os.path.join(out_dir, "predictions.test.csv"), index=False)
 
-    print("EMBEDDINGS")
-    model.remove_head()
-    if mode == "train":
-        embeds_val, targets_val = embeddings(model, data.val_dataloader(), device)
-        df = pd.DataFrame(data=embeds_val)
-        df_targets = pd.DataFrame(data=targets_val, columns=cols_names_targets)
-        df = pd.concat([df, df_targets], axis=1)
-        df.to_csv(os.path.join(out_dir, "embeddings.val.csv"), index=False)
+    if run_embeddings:
+        print("EMBEDDINGS")
+        model.remove_head()
+        if mode == "train":
+            embeds_val, targets_val = embeddings(model, data.val_dataloader(), device)
+            df = pd.DataFrame(data=embeds_val)
+            df_targets = pd.DataFrame(data=targets_val, columns=cols_names_targets)
+            df = pd.concat([df, df_targets], axis=1)
+            df.to_csv(os.path.join(out_dir, "embeddings.val.csv"), index=False)
 
-    embeds_test, targets_test = embeddings(model, data.test_dataloader(), device)
-    df = pd.DataFrame(data=embeds_test)
-    df_targets = pd.DataFrame(data=targets_test, columns=cols_names_targets)
-    df = pd.concat([df, df_targets], axis=1)
-    df.to_csv(os.path.join(out_dir, "embeddings.test.csv"), index=False)
+        embeds_test, targets_test = embeddings(model, data.test_dataloader(), device)
+        df = pd.DataFrame(data=embeds_test)
+        df_targets = pd.DataFrame(data=targets_test, columns=cols_names_targets)
+        df = pd.concat([df, df_targets], axis=1)
+        df.to_csv(os.path.join(out_dir, "embeddings.test.csv"), index=False)
 
 
 if __name__ == "__main__":
