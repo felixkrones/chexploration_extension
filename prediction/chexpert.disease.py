@@ -35,13 +35,13 @@ csv_test_img = f"../datafiles/chexpert/chexpert.sample_{img_size}_from_train_fil
 mode = "test"  # test
 
 if mode == "train":
-    out_name = f"densenet-all_{img_size}"
+    out_name = f"models/densenet-all_{img_size}"
     run_embeddings = True
 elif mode == "test":
-    model_path = "chexpert/disease/densenet-all_128/version_0/checkpoints/epoch=9-step=5090.ckpt"
-    csv_test_img = f"../datafiles/chexpert/chexpert.sample_128.test.G_nz_100_disc_1_sim_0_prev_0_pred_0_cyc_0.csv"
+    model_path = "chexpert/disease/models/densenet-all_128/version_0/checkpoints/epoch=9-step=5090.ckpt"
+    csv_test_img = f"../datafiles/chexpert/chexpert.sample_128.test.G_filtered_Frontal_nz_100_disc_0.1_sim_4.0_prev_0_pred_2.0_cyc_0.csv"
     batch_size = 25
-    out_name = f"densenet-{csv_test_img.split('sample_')[-1].split('.csv')[0]}"
+    out_name = f"pred_only/densenet-{csv_test_img.split('sample_')[-1].split('.csv')[0]}"
     path_col_test = "fake_image_path"  # cropped_image_path, fake_image_path, path_preproc
     run_embeddings = False
 
