@@ -1,8 +1,22 @@
-# Algorithmic encoding of protected characteristics in chest X-ray disease detection models
+# Extendend: Algorithmic encoding of protected characteristics in chest X-ray disease detection models
+
+## Disclaimer
+This is our extension for the repository described below, as we used it in our [Paper]().
+Please cite both if you find it helpful. We thank the original authors!
+It mainly extends the original repository in the following five ways:
+- Extended dataset support
+- Extended model support
+- Extended parameterisation
+- Extended device support
+- Our parameter settings
+- Updated requirements.txt file
+
+
+## Original work
 
 ![Components of a deep neural networks](assets/network.png "Components of a deep neural networks")
 
-This repository contains a few adjustments to the code for the paper
+This repository contains the code for the paper
 > B. Glocker, C. Jones, M. Bernhardt, S. Winzeck  
 > [**Algorithmic encoding of protected characteristics in chest X-ray disease detection models**](https://www.thelancet.com/journals/ebiom/article/PIIS2352-3964(23)00032-4/fulltext)  
 > eBioMedicine. Volume 89, 104467, March 2023.
