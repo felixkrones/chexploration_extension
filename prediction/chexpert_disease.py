@@ -39,7 +39,7 @@ if mode == "train":
     run_embeddings = True
 elif mode == "test":
     model_path = "chexpert/disease/models/densenet-all_128/version_0/checkpoints/epoch=9-step=5090.ckpt"
-    csv_test_img = f"../datafiles/chexpert/chexpert.sample_128.test.G_filtered_Frontal_nz_100_disc_0.1_sim_4.0_prev_0_pred_2.0_cyc_0.csv"
+    csv_test_img = f"../datafiles/chexpert/chexpert.sample_128.test.G_filtered_Frontal_nz_100_disc_0.05_sim_4.0_prev_0_pred_1.0_cyc_0.csv"
     batch_size = 25
     out_name = f"pred_only/densenet-{csv_test_img.split('sample_')[-1].split('.csv')[0]}"
     path_col_test = "fake_image_path"  # cropped_image_path, fake_image_path, path_preproc
@@ -47,12 +47,13 @@ elif mode == "test":
 
 
 class CheXpertDataset(Dataset):
-    def __init__(self, csv_file_img, image_size, augmentation=False, pseudo_rgb=True, path_col="path_preproc"):
+    def __init__(self, img_data_dir, csv_file_img, image_size, augmentation=False, pseudo_rgb=True, path_col="path_preproc"):
         self.data = pd.read_csv(csv_file_img)
         self.image_size = image_size
         self.do_augment = augmentation
         self.pseudo_rgb = pseudo_rgb
         self.path_col = path_col
+        self.img_data_dir = img_data_dir
 
         self.labels = [
             "No Finding",
@@ -82,7 +83,7 @@ class CheXpertDataset(Dataset):
 
         self.samples = []
         for idx, _ in enumerate(tqdm(range(len(self.data)), desc="Loading Data")):
-            img_path = img_data_dir + self.data.loc[idx, self.path_col]
+            img_path = self.img_data_dir + self.data.loc[idx, self.path_col]
             img_label = np.zeros(len(self.labels), dtype="float32")
             for i in range(0, len(self.labels)):
                 img_label[i] = np.array(
@@ -105,6 +106,8 @@ class CheXpertDataset(Dataset):
             image = self.augment(image)
 
         if self.pseudo_rgb:
+            if len(image.shape) == 2:
+                image = image.repeat(3, 1, 1)
             if image.shape[2] == 3:
                 image = image.permute(2, 0, 1)
             elif image.shape[0] == 3:
@@ -126,6 +129,7 @@ class CheXpertDataset(Dataset):
 class CheXpertDataModule(pl.LightningDataModule):
     def __init__(
         self,
+        img_data_dir,
         csv_train_img,
         csv_val_img,
         csv_test_img,
@@ -143,17 +147,20 @@ class CheXpertDataModule(pl.LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.path_col_test = path_col_test
+        self.img_data_dir = img_data_dir
 
         self.train_set = CheXpertDataset(
+            self.img_data_dir,
             self.csv_train_img,
             self.image_size,
             augmentation=True,
             pseudo_rgb=pseudo_rgb,
         )
-        self.val_set = CheXpertDataset(
+        self.val_set = CheXpertDataset(self.img_data_dir,
             self.csv_val_img, self.image_size, augmentation=False, pseudo_rgb=pseudo_rgb
         )
         self.test_set = CheXpertDataset(
+            self.img_data_dir,
             self.csv_test_img,
             self.image_size,
             augmentation=False,
@@ -243,13 +250,38 @@ class DenseNet(pl.LightningModule):
         num_features = self.model.classifier.in_features
         self.model.classifier = nn.Linear(num_features, self.num_classes)
 
+        # disect the network to access its last convolutional layer
+       # self.features_conv = self.model.features
+
+        # add the average global pool
+        #self.global_avg_pool = nn.AvgPool2d(kernel_size=7, stride=1)
+
+        # get the classifier
+        #self.classifier = self.model.classifier
+
+        # placeholder for the gradients
+        #self.gradients = None
+
     def remove_head(self):
         num_features = self.model.classifier.in_features
         id_layer = nn.Identity(num_features)
         self.model.classifier = id_layer
 
-    def forward(self, x):
-        return self.model.forward(x)
+    #def activations_hook(self, grad):
+    #    self.gradients = grad
+
+    def forward(self, x, activation=False):
+        if activation:
+            x = self.features_conv(x)
+            # register the hook
+            h = x.register_hook(self.activations_hook)
+            # don't forget the pooling
+            x = self.global_avg_pool(x)
+            x = x.view((1, 1920))
+            x = self.classifier(x)
+        else:
+            x = self.model.forward(x)
+        return x
 
     def configure_optimizers(self):
         params_to_update = []
@@ -285,6 +317,12 @@ class DenseNet(pl.LightningModule):
     def test_step(self, batch, batch_idx):
         loss = self.process_batch(batch)
         self.log("test_loss", loss)
+
+    def get_activations_gradient(self):
+        return self.gradients
+    
+    def get_activations(self, x):
+        return self.features_conv(x)
 
 
 def freeze_model(model):
@@ -346,6 +384,7 @@ def main(hparams):
 
     # data
     data = CheXpertDataModule(
+        img_data_dir=img_data_dir,
         csv_train_img=csv_train_img,
         csv_val_img=csv_val_img,
         csv_test_img=csv_test_img,

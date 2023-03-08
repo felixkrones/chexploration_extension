@@ -10,6 +10,7 @@ It mainly extends the original repository in the following five ways:
 - Extended device support
 - Our parameter settings
 - Updated requirements.txt file
+- Grad-CAM analysis in `chexpert_gradcam.ipynb`
 
 
 ## Original work
