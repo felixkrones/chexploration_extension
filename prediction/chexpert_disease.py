@@ -39,7 +39,7 @@ if mode == "train":
     run_embeddings = True
 elif mode == "test":
     model_path = "chexpert/disease/models/densenet-all_128/version_0/checkpoints/epoch=9-step=5090.ckpt"
-    csv_test_img = f"../datafiles/chexpert/chexpert.sample_128.test.G_filtered_Frontal_nz_100_disc_0.05_sim_4.0_prev_0_pred_1.0_cyc_0.csv"
+    csv_test_img = f"../datafiles/chexpert/chexpert.sample_128.test.G_filtered_Frontal_nz_500_disc_0.05_sim_5.0_prev_0_pred_6.0_cyc_0.csv"
     batch_size = 25
     out_name = f"pred_only/densenet-{csv_test_img.split('sample_')[-1].split('.csv')[0]}"
     path_col_test = "fake_image_path"  # cropped_image_path, fake_image_path, path_preproc
