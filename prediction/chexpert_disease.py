@@ -23,8 +23,9 @@ img_size = 128
 image_size = (img_size, img_size)
 num_classes = 14
 batch_size = 150
-epochs = 20
+epochs = 2
 num_workers = 4
+MODEL_TYPE = "ResNet" # DenseNet, ResNet
 
 img_data_dir = "/Users/felixkrones/python_projects/data/ChestXpert/"
 
@@ -35,13 +36,14 @@ csv_test_img = f"../datafiles/chexpert/chexpert.sample_{img_size}_from_train_fil
 mode = "test"  # test
 
 if mode == "train":
-    out_name = f"models/densenet-all_{img_size}"
+    out_name = f"models/{MODEL_TYPE.lower()}-all_{img_size}"
+    path_col_test = "path_preproc"  # cropped_image_path, fake_image_path, path_preproc
     run_embeddings = True
 elif mode == "test":
-    model_path = "chexpert/disease/models/densenet-all_128/version_0/checkpoints/epoch=9-step=5090.ckpt"
+    model_path = f"chexpert/disease/models/{MODEL_TYPE.lower()}-all_128/version_0/checkpoints/epoch=9-step=5090.ckpt"
     csv_test_img = f"../datafiles/chexpert/chexpert.sample_128.test.G_filtered_Frontal_nz_500_disc_0.05_sim_5.0_prev_0_pred_6.0_cyc_0.csv"
     batch_size = 25
-    out_name = f"pred_only/densenet-{csv_test_img.split('sample_')[-1].split('.csv')[0]}"
+    out_name = f"pred_only/{MODEL_TYPE.lower()}-{csv_test_img.split('sample_')[-1].split('.csv')[0]}"
     path_col_test = "fake_image_path"  # cropped_image_path, fake_image_path, path_preproc
     run_embeddings = False
 
@@ -99,15 +101,16 @@ class CheXpertDataset(Dataset):
     def __getitem__(self, item):
         sample = self.get_sample(item)
 
-        image = torch.from_numpy(sample["image"])#.unsqueeze(0)
+        image = torch.from_numpy(sample["image"]).unsqueeze(0)
         label = torch.from_numpy(sample["label"])
+
+        if len(image.shape) == 2:
+            image = image.repeat(3, 1, 1)
 
         if self.do_augment:
             image = self.augment(image)
 
         if self.pseudo_rgb:
-            if len(image.shape) == 2:
-                image = image.repeat(3, 1, 1)
             if image.shape[2] == 3:
                 image = image.permute(2, 0, 1)
             elif image.shape[0] == 3:
@@ -250,38 +253,13 @@ class DenseNet(pl.LightningModule):
         num_features = self.model.classifier.in_features
         self.model.classifier = nn.Linear(num_features, self.num_classes)
 
-        # disect the network to access its last convolutional layer
-       # self.features_conv = self.model.features
-
-        # add the average global pool
-        #self.global_avg_pool = nn.AvgPool2d(kernel_size=7, stride=1)
-
-        # get the classifier
-        #self.classifier = self.model.classifier
-
-        # placeholder for the gradients
-        #self.gradients = None
-
     def remove_head(self):
         num_features = self.model.classifier.in_features
         id_layer = nn.Identity(num_features)
         self.model.classifier = id_layer
 
-    #def activations_hook(self, grad):
-    #    self.gradients = grad
-
-    def forward(self, x, activation=False):
-        if activation:
-            x = self.features_conv(x)
-            # register the hook
-            h = x.register_hook(self.activations_hook)
-            # don't forget the pooling
-            x = self.global_avg_pool(x)
-            x = x.view((1, 1920))
-            x = self.classifier(x)
-        else:
-            x = self.model.forward(x)
-        return x
+    def forward(self, x):
+        return self.model.forward(x)
 
     def configure_optimizers(self):
         params_to_update = []
@@ -317,12 +295,6 @@ class DenseNet(pl.LightningModule):
     def test_step(self, batch, batch_idx):
         loss = self.process_batch(batch)
         self.log("test_loss", loss)
-
-    def get_activations_gradient(self):
-        return self.gradients
-    
-    def get_activations(self, x):
-        return self.features_conv(x)
 
 
 def freeze_model(model):
@@ -396,7 +368,7 @@ def main(hparams):
     )
 
     # model
-    model_type = DenseNet
+    model_type = eval(MODEL_TYPE)
     model = model_type(num_classes=num_classes)
 
     # Create output directory

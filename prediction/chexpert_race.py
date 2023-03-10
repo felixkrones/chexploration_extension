@@ -21,30 +21,42 @@ device_type = "mps"
 random_seed = 42
 img_size = 128
 image_size = (img_size, img_size)
-num_classes = 3
-class_weights = (1.0, 1.0, 1.0)  # can be changed to balance accuracy
+num_classes = 14
 batch_size = 150
 epochs = 20
 num_workers = 4
+MODEL_TYPE = "ResNet" # DenseNet, ResNet
+class_weights = (1.0, 1.0, 1.0)  # can be changed to balance accuracy
 
 img_data_dir = "/Users/felixkrones/python_projects/data/ChestXpert/"
 
-csv_train_img = f"../datafiles/chexpert/chexpert.sample_{img_size}.train.csv"
-csv_val_img = f"../datafiles/chexpert/chexpert.sample_{img_size}.val.csv"
-csv_test_img = f"../datafiles/chexpert/chexpert.sample_{img_size}.test.csv"
+csv_train_img = f"../datafiles/chexpert/chexpert.sample_{img_size}_from_train_filtered_True.train.csv"
+csv_val_img = f"../datafiles/chexpert/chexpert.sample_{img_size}_from_train_filtered_True.val.csv"
+csv_test_img = f"../datafiles/chexpert/chexpert.sample_{img_size}_from_train_filtered_True.test.csv"
 
-out_name = f"densenet-all_{img_size}"
+mode = "test"  # test
 
-mode = "train"  # test
-model_path = ""
+if mode == "train":
+    out_name = f"models/{MODEL_TYPE.lower()}-all_{img_size}"
+    path_col_test = "path_preproc"  # cropped_image_path, fake_image_path, path_preproc
+    run_embeddings = True
+elif mode == "test":
+    model_path = f"chexpert/disease/models/{MODEL_TYPE.lower()}-all_128/version_0/checkpoints/epoch=9-step=5090.ckpt"
+    csv_test_img = f"../datafiles/chexpert/chexpert.sample_128.test.G_filtered_Frontal_nz_500_disc_0.05_sim_5.0_prev_0_pred_6.0_cyc_0.csv"
+    batch_size = 25
+    out_name = f"pred_only/{MODEL_TYPE.lower()}-{csv_test_img.split('sample_')[-1].split('.csv')[0]}"
+    path_col_test = "fake_image_path"  # cropped_image_path, fake_image_path, path_preproc
+    run_embeddings = False
 
 
 class CheXpertDataset(Dataset):
-    def __init__(self, csv_file_img, image_size, augmentation=False, pseudo_rgb=True):
+    def __init__(self, img_data_dir, csv_file_img, image_size, augmentation=False, pseudo_rgb=True, path_col="path_preproc"):
         self.data = pd.read_csv(csv_file_img)
         self.image_size = image_size
         self.do_augment = augmentation
         self.pseudo_rgb = pseudo_rgb
+        self.path_col = path_col
+        self.img_data_dir = img_data_dir
 
         self.augment = T.Compose(
             [
@@ -57,7 +69,7 @@ class CheXpertDataset(Dataset):
 
         self.samples = []
         for idx, _ in enumerate(tqdm(range(len(self.data)), desc="Loading Data")):
-            img_path = img_data_dir + self.data.loc[idx, "path_preproc"]
+            img_path = self.img_data_dir + self.data.loc[idx, self.path_col]
             img_label = np.array(self.data.loc[idx, "race_label"], dtype="int64")
 
             sample = {"image_path": img_path, "label": img_label}
@@ -76,7 +88,14 @@ class CheXpertDataset(Dataset):
             image = self.augment(image)
 
         if self.pseudo_rgb:
-            image = image.repeat(3, 1, 1)
+            if image.shape[2] == 3:
+                image = image.permute(2, 0, 1)
+            elif image.shape[0] == 3:
+                image = image
+            elif image.shape[0] == 1:
+                image = image.repeat(3, 1, 1)
+            else:
+                raise ValueError(f"Image shape {image.shape} not supported")
 
         return {"image": image, "label": label}
 
@@ -90,6 +109,7 @@ class CheXpertDataset(Dataset):
 class CheXpertDataModule(pl.LightningDataModule):
     def __init__(
         self,
+        img_data_dir,
         csv_train_img,
         csv_val_img,
         csv_test_img,
@@ -97,6 +117,7 @@ class CheXpertDataModule(pl.LightningDataModule):
         pseudo_rgb,
         batch_size,
         num_workers,
+        path_col_test="path_preproc",
     ):
         super().__init__()
         self.csv_train_img = csv_train_img
@@ -105,21 +126,26 @@ class CheXpertDataModule(pl.LightningDataModule):
         self.image_size = image_size
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.path_col_test = path_col_test
+        self.img_data_dir = img_data_dir
 
         self.train_set = CheXpertDataset(
+            self.img_data_dir,
             self.csv_train_img,
             self.image_size,
             augmentation=True,
             pseudo_rgb=pseudo_rgb,
         )
-        self.val_set = CheXpertDataset(
+        self.val_set = CheXpertDataset(self.img_data_dir,
             self.csv_val_img, self.image_size, augmentation=False, pseudo_rgb=pseudo_rgb
         )
         self.test_set = CheXpertDataset(
+            self.img_data_dir,
             self.csv_test_img,
             self.image_size,
             augmentation=False,
             pseudo_rgb=pseudo_rgb,
+            path_col=self.path_col_test
         )
 
         print("#train: ", len(self.train_set))
@@ -274,6 +300,7 @@ def main(hparams):
 
     # data
     data = CheXpertDataModule(
+        img_data_dir=img_data_dir,
         csv_train_img=csv_train_img,
         csv_val_img=csv_val_img,
         csv_test_img=csv_test_img,
@@ -281,10 +308,11 @@ def main(hparams):
         pseudo_rgb=True,
         batch_size=batch_size,
         num_workers=num_workers,
+        path_col_test=path_col_test,
     )
 
     # model
-    model_type = DenseNet
+    model_type = eval(MODEL_TYPE)
     model = model_type(num_classes=num_classes, class_weights=class_weights)
 
     # Create output directory
@@ -341,11 +369,12 @@ def main(hparams):
 
     cols_names = ["class_" + str(i) for i in range(0, num_classes)]
 
-    print("VALIDATION")
-    preds_val, targets_val = test(model, data.val_dataloader(), device)
-    df = pd.DataFrame(data=preds_val, columns=cols_names)
-    df["target"] = targets_val
-    df.to_csv(os.path.join(out_dir, "predictions.val.csv"), index=False)
+    if mode == "train":
+        print("VALIDATION")
+        preds_val, targets_val = test(model, data.val_dataloader(), device)
+        df = pd.DataFrame(data=preds_val, columns=cols_names)
+        df["target"] = targets_val
+        df.to_csv(os.path.join(out_dir, "predictions.val.csv"), index=False)
 
     print("TESTING")
     preds_test, targets_test = test(model, data.test_dataloader(), device)
