@@ -21,11 +21,11 @@ device_type = "mps"
 random_seed = 42
 img_size = 128
 image_size = (img_size, img_size)
-num_classes = 14
+num_classes = 3
 batch_size = 150
 epochs = 20
 num_workers = 4
-MODEL_TYPE = "ResNet" # DenseNet, ResNet
+MODEL_TYPE = "DenseNet" # DenseNet, ResNet
 class_weights = (1.0, 1.0, 1.0)  # can be changed to balance accuracy
 
 img_data_dir = "/Users/felixkrones/python_projects/data/ChestXpert/"
@@ -41,8 +41,8 @@ if mode == "train":
     path_col_test = "path_preproc"  # cropped_image_path, fake_image_path, path_preproc
     run_embeddings = True
 elif mode == "test":
-    model_path = f"chexpert/disease/models/{MODEL_TYPE.lower()}-all_128/version_0/checkpoints/epoch=9-step=5090.ckpt"
-    csv_test_img = f"../datafiles/chexpert/chexpert.sample_128.test.G_filtered_Frontal_nz_500_disc_0.05_sim_5.0_prev_0_pred_6.0_cyc_0.csv"
+    model_path = f"chexpert/race/models/{MODEL_TYPE.lower()}-all_128/version_2/checkpoints/epoch=10-step=5599.ckpt"
+    csv_test_img = f"../datafiles/chexpert/chexpert.sample_128.test.G_filtered_Frontal_nz_500_disc_0.05_sim_5.0_prev_6.0_pred_6.0_cyc_0.csv"
     batch_size = 25
     out_name = f"pred_only/{MODEL_TYPE.lower()}-{csv_test_img.split('sample_')[-1].split('.csv')[0]}"
     path_col_test = "fake_image_path"  # cropped_image_path, fake_image_path, path_preproc
@@ -81,7 +81,9 @@ class CheXpertDataset(Dataset):
     def __getitem__(self, item):
         sample = self.get_sample(item)
 
-        image = torch.from_numpy(sample["image"]).unsqueeze(0)
+        image = torch.from_numpy(sample["image"])
+        if len(image.shape) == 2:
+            image = image.unsqueeze(0)
         label = torch.from_numpy(sample["label"])
 
         if self.do_augment:
@@ -277,7 +279,8 @@ def test(model, data_loader, device):
     with torch.no_grad():
         for index, batch in enumerate(tqdm(data_loader, desc="Test-loop")):
             img, lab = batch["image"].to(device), batch["label"].to(device)
-            pred = torch.softmax(model(img), dim=1)
+            p_out = model(img)
+            pred = torch.softmax(p_out, dim=1)
             preds.append(pred)
             targets.append(lab)
 

@@ -21,7 +21,7 @@ device_type = "mps"
 random_seed = 42
 img_size = 128
 image_size = (img_size, img_size)
-num_classes = 14
+num_classes = 2
 batch_size = 150
 epochs = 20
 num_workers = 4
@@ -33,14 +33,14 @@ csv_train_img = f"../datafiles/chexpert/chexpert.sample_{img_size}_from_train_fi
 csv_val_img = f"../datafiles/chexpert/chexpert.sample_{img_size}_from_train_filtered_True.val.csv"
 csv_test_img = f"../datafiles/chexpert/chexpert.sample_{img_size}_from_train_filtered_True.test.csv"
 
-mode = "train"  # test
+mode = "test"  # test
 
 if mode == "train":
     out_name = f"models/{MODEL_TYPE.lower()}-all_{img_size}"
     path_col_test = "path_preproc"  # cropped_image_path, fake_image_path, path_preproc
     run_embeddings = True
 elif mode == "test":
-    model_path = f"chexpert/disease/models/{MODEL_TYPE.lower()}-all_128/version_0/checkpoints/epoch=9-step=5090.ckpt"
+    model_path = f"chexpert/sex/models/{MODEL_TYPE.lower()}-all_128/version_0/checkpoints/epoch=13-step=7126.ckpt"
     csv_test_img = f"../datafiles/chexpert/chexpert.sample_128.test.G_filtered_Frontal_nz_500_disc_0.05_sim_5.0_prev_0_pred_6.0_cyc_0.csv"
     batch_size = 25
     out_name = f"pred_only/{MODEL_TYPE.lower()}-{csv_test_img.split('sample_')[-1].split('.csv')[0]}"
@@ -76,7 +76,9 @@ class CheXpertDataset(Dataset):
     def __getitem__(self, item):
         sample = self.get_sample(item)
 
-        image = torch.from_numpy(sample['image']).unsqueeze(0)
+        image = torch.from_numpy(sample['image'])
+        if len(image.shape) == 2:
+            image = image.unsqueeze(0)
         label = torch.from_numpy(sample['label'])
 
         if self.do_augment:
@@ -300,7 +302,6 @@ def main(hparams):
     model = model_type(num_classes=num_classes)
 
     # Create output directory
-    out_name = 'densenet-all'
     out_dir = 'chexpert/sex/' + out_name
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
