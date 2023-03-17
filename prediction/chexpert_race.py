@@ -36,13 +36,12 @@ csv_test_img = f"../datafiles/chexpert/chexpert.sample_{img_size}_from_train_fil
 
 mode = "test"  # test
 
-if mode == "train":
-    out_name = f"models/{MODEL_TYPE.lower()}-all_{img_size}"
-    path_col_test = "path_preproc"  # cropped_image_path, fake_image_path, path_preproc
-    run_embeddings = True
-elif mode == "test":
-    model_path = f"chexpert/race/models/{MODEL_TYPE.lower()}-all_128/version_2/checkpoints/epoch=10-step=5599.ckpt"
-    csv_test_img = f"../datafiles/chexpert/chexpert.sample_128.test.G_filtered_Frontal_nz_500_disc_0.05_sim_5.0_prev_6.0_pred_6.0_cyc_0.csv"
+out_name = f"models/{MODEL_TYPE.lower()}-all_{img_size}"
+path_col_test = "path_preproc"  # cropped_image_path, fake_image_path, path_preproc
+run_embeddings = True
+if mode == "test":
+    model_path = "/Users/felixkrones/python_projects/src/chexploration_extension/prediction/chexpert/race/models/densenet-all_128/version_2/checkpoints/epoch=10-step=5599.ckpt"
+    csv_test_img = f"../datafiles/chexpert/chexpert.sample_128.test.G_filtered_Frontal_bs_128_lr_0.0002_nz_100_disc_0.1_sim_4.0_prev_0.3_pred_0.3_cyc_1.csv"
     batch_size = 25
     out_name = f"pred_only/{MODEL_TYPE.lower()}-{csv_test_img.split('sample_')[-1].split('.csv')[0]}"
     path_col_test = "fake_image_path"  # cropped_image_path, fake_image_path, path_preproc
@@ -85,6 +84,7 @@ class CheXpertDataset(Dataset):
         if len(image.shape) == 2:
             image = image.unsqueeze(0)
         label = torch.from_numpy(sample["label"])
+        image_path = sample["image_path"]
 
         if self.do_augment:
             image = self.augment(image)
@@ -99,13 +99,16 @@ class CheXpertDataset(Dataset):
             else:
                 raise ValueError(f"Image shape {image.shape} not supported")
 
-        return {"image": image, "label": label}
+        return {"image": image, "label": label, "image_path": image_path}
 
     def get_sample(self, item):
         sample = self.samples[item]
-        image = imread(sample["image_path"]).astype(np.float32)
+        try:
+            image = imread(sample["image_path"]).astype(np.float32)
+        except:
+            image = imread(sample["image_path"].replace("jpg", "png")).astype(np.float32)
 
-        return {"image": image, "label": sample["label"]}
+        return {"image": image, "label": sample["label"], "image_path": sample["image_path"]}
 
 
 class CheXpertDataModule(pl.LightningDataModule):
@@ -275,14 +278,16 @@ def test(model, data_loader, device):
     model.eval()
     preds = []
     targets = []
+    paths = []
 
     with torch.no_grad():
         for index, batch in enumerate(tqdm(data_loader, desc="Test-loop")):
-            img, lab = batch["image"].to(device), batch["label"].to(device)
+            img, lab, path = batch["image"].to(device), batch["label"].to(device), batch["image_path"]
             p_out = model(img)
             pred = torch.softmax(p_out, dim=1)
             preds.append(pred)
             targets.append(lab)
+            paths = paths + path
 
         preds = torch.cat(preds, dim=0)
         targets = torch.cat(targets, dim=0)
@@ -294,7 +299,7 @@ def test(model, data_loader, device):
             counts.append(c)
         print(counts)
 
-    return preds.cpu().numpy(), targets.cpu().numpy()
+    return preds.cpu().numpy(), targets.cpu().numpy(), paths
 
 
 def main(hparams):
@@ -327,12 +332,13 @@ def main(hparams):
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir)
 
-    for idx in range(0, 5):
-        sample = data.train_set.get_sample(idx)
-        imsave(
-            os.path.join(temp_dir, "sample_" + str(idx) + ".jpg"),
-            sample["image"].astype(np.uint8),
-        )
+    if False:
+        for idx in range(0, 5):
+            sample = data.train_set.get_sample(idx)
+            imsave(
+                os.path.join(temp_dir, "sample_" + str(idx) + ".jpg"),
+                sample["image"].astype(np.uint8),
+            )
 
     if mode == "train":
         checkpoint_callback = ModelCheckpoint(monitor="val_loss", mode="min")
@@ -374,15 +380,16 @@ def main(hparams):
 
     if mode == "train":
         print("VALIDATION")
-        preds_val, targets_val = test(model, data.val_dataloader(), device)
+        preds_val, targets_val, _ = test(model, data.val_dataloader(), device)
         df = pd.DataFrame(data=preds_val, columns=cols_names)
         df["target"] = targets_val
         df.to_csv(os.path.join(out_dir, "predictions.val.csv"), index=False)
 
     print("TESTING")
-    preds_test, targets_test = test(model, data.test_dataloader(), device)
+    preds_test, targets_test, paths_test = test(model, data.test_dataloader(), device)
     df = pd.DataFrame(data=preds_test, columns=cols_names)
     df["target"] = targets_test
+    df["paths"] = paths_test
     df.to_csv(os.path.join(out_dir, "predictions.test.csv"), index=False)
 
 

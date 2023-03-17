@@ -23,7 +23,7 @@ img_size = 128
 image_size = (img_size, img_size)
 num_classes = 14
 batch_size = 150
-epochs = 2
+epochs = 20
 num_workers = 4
 MODEL_TYPE = "DenseNet" # DenseNet, ResNet
 
@@ -35,13 +35,12 @@ csv_test_img = f"../datafiles/chexpert/chexpert.sample_{img_size}_from_train_fil
 
 mode = "test"  # test
 
-if mode == "train":
-    out_name = f"models/{MODEL_TYPE.lower()}-all_{img_size}"
-    path_col_test = "path_preproc"  # cropped_image_path, fake_image_path, path_preproc
-    run_embeddings = True
-elif mode == "test":
+out_name = f"models/{MODEL_TYPE.lower()}-all_{img_size}"
+path_col_test = "path_preproc"  # cropped_image_path, fake_image_path, path_preproc
+run_embeddings = True
+if mode == "test":
     model_path = f"chexpert/disease/models/{MODEL_TYPE.lower()}-all_128/version_0/checkpoints/epoch=9-step=5090.ckpt"
-    csv_test_img = f"../datafiles/chexpert/chexpert.sample_128.test.G_filtered_Frontal_nz_500_disc_0.05_sim_5.0_prev_6.0_pred_6.0_cyc_0.csv"
+    csv_test_img = f"../datafiles/chexpert/chexpert.sample_128.test.G_filtered_Frontal_bs_128_lr_0.0002_nz_100_disc_0.1_sim_4.0_prev_0.3_pred_0.3_cyc_1.csv"
     batch_size = 25
     out_name = f"pred_only/{MODEL_TYPE.lower()}-{csv_test_img.split('sample_')[-1].split('.csv')[0]}"
     path_col_test = "fake_image_path"  # cropped_image_path, fake_image_path, path_preproc
@@ -377,12 +376,13 @@ def main(hparams):
     if not os.path.exists(temp_dir):
         os.makedirs(temp_dir)
 
-    for idx in range(0, 5):
-        sample = data.train_set.get_sample(idx)
-        imsave(
-            os.path.join(temp_dir, "sample_" + str(idx) + ".jpg"),
-            sample["image"].astype(np.uint8),
-        )
+    if False:
+        for idx in range(0, 5):
+            sample = data.train_set.get_sample(idx)
+            imsave(
+                os.path.join(temp_dir, "sample_" + str(idx) + ".jpg"),
+                sample["image"].astype(np.uint8),
+            )
 
     if mode == "train":
         checkpoint_callback = ModelCheckpoint(monitor="val_loss", mode="min")
